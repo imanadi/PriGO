@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 type task struct {
@@ -191,9 +194,17 @@ func (tm *taskManager) sortTasks() error {
 }
 
 func getCredentials() (username string, password string) {
-	fmt.Println("Enter MySQL username:")
-	fmt.Scanln(&username)
-	fmt.Println("Enter MySQL password:")
-	fmt.Scanln(&password)
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Print("Enter MySQL username: ")
+	username, _ = reader.ReadString('\n')
+	username = strings.TrimSpace(username)
+
+	fmt.Print("Enter MySQL password: ")
+	passwordBytes, _ := terminal.ReadPassword(int(syscall.Stdin))
+	password = string(passwordBytes)
+	fmt.Println()
+
 	return username, password
 }
+
