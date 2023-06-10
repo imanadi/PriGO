@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"time"
+
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -20,7 +21,7 @@ type task struct {
 
 func main() {
 	fmt.Println("Welcome")
-	username, password := getCredentials();
+	username, password := getCredentials()
 	db, err := sql.Open("mysql", username+":"+password+"@tcp(localhost:3306)/task_picker")
 	if err != nil {
 		fmt.Println("Failed to connect to the database:", err)
@@ -28,8 +29,8 @@ func main() {
 	}
 	defer db.Close()
 
-	for  {
-		fmt.Println("Enter 1 to enter a task, 2 to check tasks, anything else to exit")
+	for {
+		fmt.Println("Enter 1 to enter a task, 2 to return upcoming tasks, 3 to return old tasks, anything else to exit")
 		var input int
 		fmt.Scanln(&input)
 		switch input {
@@ -40,7 +41,17 @@ func main() {
 				return
 			}
 		case 2:
-			returnTasks(db)
+			err := sortTasks(db)
+			if err != nil {
+				fmt.Println("Error sorting tasks:", err)
+			}
+			returnTasks(db, "tasks")
+		case 3:
+			err := sortTasks(db)
+			if err != nil {
+				fmt.Println("Error sorting tasks:", err)
+			}
+			returnTasks(db, "oldTasks")
 		default:
 			return
 		}
@@ -48,6 +59,10 @@ func main() {
 }
 
 func createTask(db *sql.DB) (task, error) {
+	err := sortTasks(db)
+	if err != nil {
+		fmt.Println("Error sorting tasks:", err)
+	}
 	scanner := bufio.NewScanner(os.Stdin)
 
 	fmt.Print("Enter task name: ")
@@ -74,7 +89,7 @@ func createTask(db *sql.DB) (task, error) {
 		return task{}, fmt.Errorf("failed to parse deadline: %v", err)
 	}
 
-	fmt.Print("Enter task duration (in hours): ")
+	fmt.Print("Enter task duration (in days): ")
 	scanner.Scan()
 	durationStr := scanner.Text()
 	duration, err := strconv.Atoi(durationStr)
@@ -100,15 +115,16 @@ func createTask(db *sql.DB) (task, error) {
 	return newTask, nil
 }
 
-func returnTasks(db *sql.DB) {
-	rows, err := db.Query("SELECT name, description, priority, deadline, duration FROM tasks")
+func returnTasks(db *sql.DB, tableName string) {
+
+	rows, err := db.Query("SELECT name, description, priority, deadline, duration FROM " + tableName)
 	if err != nil {
 		fmt.Println("Failed to retrieve tasks:", err)
 		return
 	}
 	defer rows.Close()
 
-	fmt.Println("Tasks:")
+	fmt.Println("Tasks from " + tableName)
 	for rows.Next() {
 		var name, description string
 		var priority, duration int
@@ -134,7 +150,8 @@ func returnTasks(db *sql.DB) {
 			Duration:    duration,
 		}
 
-		fmt.Printf("Task: %v\n", t)
+		fmt.Printf("Name: %s\nDescription: %s\nPriority: %d\nDeadline: %s\nDuration: %d days\n\n",
+			t.Name, t.Description, t.Priority, t.Deadline.Format("2006-01-02"), t.Duration)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -142,10 +159,36 @@ func returnTasks(db *sql.DB) {
 	}
 }
 
+func sortTasks(db *sql.DB) error {
+	// Move tasks whose deadlines are crossed to the "oldTasks" table
+	_, err := db.Exec("INSERT INTO oldTasks SELECT * FROM tasks WHERE deadline < NOW()")
+	if err != nil {
+		return fmt.Errorf("failed to move tasks to oldTasks table: %v", err)
+	}
+
+	// Delete the moved tasks from the "tasks" table
+	_, err = db.Exec("DELETE FROM tasks WHERE deadline < NOW()")
+	if err != nil {
+		return fmt.Errorf("failed to delete tasks from tasks table: %v", err)
+	}
+
+	// Sort the remaining tasks by priority and duration
+	_, err = db.Exec("ALTER TABLE tasks ORDER BY priority, deadline, duration")
+	if err != nil {
+		return fmt.Errorf("failed to sort tasks: %v", err)
+	}
+	_, err = db.Exec("ALTER TABLE oldTasks ORDER BY priority, deadline, duration")
+	if err != nil {
+		return fmt.Errorf("failed to sort tasks: %v", err)
+	}
+
+	return nil
+}
+
 func getCredentials() (username string, password string) {
-	fmt.Println("Enter mysql username")
+	fmt.Println("Enter MySQL username:")
 	fmt.Scanln(&username)
-	fmt.Println("Enter mysql password")
+	fmt.Println("Enter MySQL password:")
 	fmt.Scanln(&password)
-	return username,password
+	return username, password
 }
